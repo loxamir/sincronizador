@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<openerp>
+    <data>
+        <record id="connector_sync" model="ir.ui.view">
+            <field name="name">Sync Form</field>
+            <field name="model">ir.model.data.sync</field>
+            <field name="arch" type="xml"> 
+                <form>
+                    <header>
+                        <button name="send_all_to_couch" string="Send All To Couch" type="object"/>
+                        <button name="create_xmlid_for_everything" string="Create External ID for everything" type="object"/>
+                    </header>
+                    <group>
+                        <group>
+                            <field name="server"/>
+                        </group>
+                        <group>
+                            <field name="last_seq"/>
+                        </group>
+                    </group>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_connector_sync" model="ir.actions.act_window">
+        <field name="name">Synchronism</field>
+        <field name="res_model">ir.model.data.sync</field>
+        <field name="res_id">1</field>
+        <field name="view_mode">form</field>
+        </record>
+
+        <menuitem id="connector_sync_menu" name="Synchronism" parent="base.next_id_9" action="action_connector_sync" sequence="10"/>
+
+        <!-- Vistas del modelo ir.model.data -->
+        <record id="connector_couchdb" model="ir.ui.view">
+            <field name="name">ir.model.data_form</field>
+            <field name="model">ir.model.data</field>
+            <field name='inherit_id' ref="base.view_model_data_form"/>
+            <field name="arch" type="xml"> 
+                <group position="before">
+                    <group>
+                        <group>
+                            <field name="_id"/>
+                        </group>
+                        <group>
+                            <field name="synchronized"/>
+                            <field name="unlinked"/>
+                        </group>
+                    </group>
+                </group>
+            </field>
+        </record>
+    </data>
+</openerp>
