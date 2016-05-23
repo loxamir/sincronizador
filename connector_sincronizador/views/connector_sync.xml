@@ -31,6 +31,35 @@
 
         <menuitem id="connector_sync_menu" name="Synchronism" parent="base.next_id_9" action="action_connector_sync" sequence="10"/>
 
+
+        <record id="connector_sync_queue" model="ir.ui.view">
+            <field name="name">Sync Queue Form</field>
+            <field name="model">ir.model.data.sync.queue</field>
+            <field name="arch" type="xml"> 
+                <form>
+                    <group>
+                        <group>
+                            <!--field name="xml_id"/-->
+                            <field name="name"/>
+                        </group>
+                        <group>
+                            <field name="vals"/>
+                            <!--field name="_id"/-->
+                            <field name="method"/>
+                        </group>
+                    </group>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_connector_sync_queue" model="ir.actions.act_window">
+        <field name="name">Synchronism Queue</field>
+        <field name="res_model">ir.model.data.sync.queue</field>
+        <field name="view_mode">tree,form</field>
+        </record>
+
+        <menuitem id="connector_sync_queue_menu" name="Synchronism Queue" parent="base.next_id_9" action="action_connector_sync_queue" sequence="15"/>
+
         <!-- Vistas del modelo ir.model.data -->
         <record id="connector_couchdb" model="ir.ui.view">
             <field name="name">ir.model.data_form</field>
@@ -41,10 +70,6 @@
                     <group>
                         <group>
                             <field name="_id"/>
-                        </group>
-                        <group>
-                            <field name="synchronized"/>
-                            <field name="unlinked"/>
                         </group>
                     </group>
                 </group>

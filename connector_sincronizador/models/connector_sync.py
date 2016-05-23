@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from openerp import models, fields, api
 import couchdb
+import itertools
+
 couch_database = 'python2'
 
 class IrModelDataSync(models.Model):
@@ -8,16 +10,6 @@ class IrModelDataSync(models.Model):
 
     server = fields.Char(string="Server")
     last_seq = fields.Integer(string="Last Sequence")
-
-
-    @api.multi
-    def test_is_compute(self):
-        #print "Field: %s"%self._parent_store_compute
-        field = self.env['ir.model.fields'].search([
-            ('name','=','product_qty'),
-            ('model_id','=',320)])
-        print "Field: %s"%field.recompute()
-        return True
 
     @api.multi
     def create_couch2(self, res_id):
@@ -141,12 +133,68 @@ class IrModelDataSync(models.Model):
 
     @api.multi
     def send_all_to_couch(self):  
+        """
+        All register have to have external_id
+        """
+        # Time with couchdb saving ervery register 6:55
+        # Time without couchdb 0:25
+        # Time saving in every model 3:15
+        # Time saving just at the end: 3:11
+        # Conclusion: the command db.get(external_id) is what make this slow
+
+        print "Preparing all data"
+        couch = couchdb.Server()
+        db = couch[couch_database]
+        dont_sync_models = ['ir.model.data', 'ir.model.data.sync', 'ir.model.data.sync.queue']
+        all_models = self.env['ir.model'].search([
+            ('osv_memory','=',False),
+            ('model','not in', dont_sync_models),
+            #('model','in', ['res.users'])
+            ])
+        unused_fields = ['id', '__last_update', 'global']
+        
+        for model in all_models:
+            if not self.env['ir.model.fields'].search([
+                ('name','=','create_uid'),
+                ('model_id','=',model.model)
+                ]):
+                continue
+            all_records = self.env[model.model].search([])
+            for record in all_records:
+                all_fields = record._fields
+                external_id = record.get_external_id().values()[0]
+                all_values = db.get(external_id) or {'_id': external_id}
+                tmp_doc = all_values.copy()
+
+                for field in all_fields:
+                    if field in unused_fields or not eval('record.'+field):
+                        continue
+                    if all_fields[field].type == 'many2one':
+                        field_external_id = eval('record.'+field).get_external_id().values()[0]
+                        all_values[field] = field_external_id
+                    elif all_fields[field].type == 'one2many':
+                        continue
+                    elif all_fields[field].type == 'many2many':
+                        all_values[field] = eval('record.'+field).get_external_id().values()
+                    elif all_fields[field].type == 'reference':
+                        #TODO: FIX this
+                        print "reference"
+                        continue
+                    else:
+                        all_values[field] = eval('record.'+field)
+                print 'external_id %s'%all_values['_id']
+                if tmp_doc != all_values.copy():
+                    db.save(all_values)
+        return True  
+
+    @api.multi
+    def send_all_to_couch_old(self):  
         print "Start Sending all to couchdb"   
         couch = couchdb.Server()
         #db = couch[self.pool.db.dbname]
         db = couch[couch_database]
 
-        dont_sync_models = ['ir.model.data', 'ir.model.data.sync']
+        dont_sync_models = ['ir.model.data', 'ir.model.data.sync', 'ir.model.data.sync.queue']
 
         # This is to avoid and unnecessary models
         for model in self.env['ir.model'].search([('osv_memory','=',True)]):
@@ -294,16 +342,16 @@ class IrModelDataSync(models.Model):
         postfix = 0
         name = '%s_%s' % (model, id)
         ir_model_data = self.env['ir.model.data']
-        while ir_model_data.search([('module', '=', '__export__'), ('name', '=', name)]):
+        while ir_model_data.search([('module', '=', 'export__'), ('name', '=', name)]):
             postfix += 1
             name = '%s_%s_%s' % (model, id, postfix)
         ir_model_data.create({
             'model': model,
             'res_id': id,
-            'module': '__export__',
+            'module': 'export__',
             'name': name,
         })
-        return '__export__.' + name
+        return 'export__.' + name
 
     @api.model
     def format_fields(self, local_record, xmlid, field_list):
@@ -391,8 +439,15 @@ class IrModelDataSync(models.Model):
 class IrModelDataSyncQueue(models.Model):
     _name = 'ir.model.data.sync.queue'
 
-    xml_id = fields.Many2one('ir.model.data', string="Document XML ID")
+    #xml_id = fields.Many2one('ir.model.data', string="Document XML ID")
     name = fields.Char(string='Name')
+    vals = fields.Text(string="Values")
+    #_id = fields.Char(string="Global ID")
+    method = fields.Selection([
+        ('create','Create'),
+        ('write','Write'),
+        ('unlink','Remove')
+        ], string="Method")
 
 
 class IrModelData(models.Model):
