@@ -1,21 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <openerp>
     <data>
+
+        <record id="config" model="ir.model.data.sync">
+            <field name="server">server-config</field>
+            <field name="last_seq">0</field>
+            <field name="couch_database">python2</field>
+            <field name="last_sync_sequence">2</field>
+        </record>
+
         <record id="connector_sync" model="ir.ui.view">
             <field name="name">Sync Form</field>
             <field name="model">ir.model.data.sync</field>
             <field name="arch" type="xml"> 
                 <form>
                     <header>
-                        <button name="send_all_to_couch" string="Send All To Couch" type="object"/>
-                        <button name="create_xmlid_for_everything" string="Create External ID for everything" type="object"/>
+                        
+                        <!--button name="create_xmlid_for_everything" string="Create External ID for everything" type="object"/>
+                        <button name="send_all_to_couch" string="Send All To Couch" type="object"/-->
+                        <button name="first_time" string="Primera vez" type="object"/>
+                        <!--button name="set_sequence" string="Sequenciar" type="object"/-->
+                        <button name="send_changes_to_couch" string="Send all changes" type="object"/>
                     </header>
                     <group>
                         <group>
                             <field name="server"/>
+                            <field name="couch_database"/>
                         </group>
                         <group>
                             <field name="last_seq"/>
+                            <field name="last_sync_sequence"/>
                         </group>
                     </group>
                 </form>
@@ -23,10 +37,10 @@
         </record>
 
         <record id="action_connector_sync" model="ir.actions.act_window">
-        <field name="name">Synchronism</field>
-        <field name="res_model">ir.model.data.sync</field>
-        <field name="res_id">1</field>
-        <field name="view_mode">form</field>
+            <field name="name">Synchronism</field>
+            <field name="res_model">ir.model.data.sync</field>
+            <field name="res_id" ref="config"/>
+            <field name="view_mode">form</field>
         </record>
 
         <menuitem id="connector_sync_menu" name="Synchronism" parent="base.next_id_9" action="action_connector_sync" sequence="10"/>
@@ -37,18 +51,30 @@
             <field name="model">ir.model.data.sync.queue</field>
             <field name="arch" type="xml"> 
                 <form>
+                    <header>
+                        <button name="send_to_couch" string="Enviar" type="object"/>
+                    </header>
                     <group>
                         <group>
-                            <!--field name="xml_id"/-->
                             <field name="name"/>
+                            <field name="vals"/>
                         </group>
                         <group>
-                            <field name="vals"/>
-                            <!--field name="_id"/-->
-                            <field name="method"/>
+                            <field name="sequence"/>
                         </group>
                     </group>
                 </form>
+            </field>
+        </record>
+
+        <record id="connector_sync_queue_tree" model="ir.ui.view">
+            <field name="name">Sync Queue Tree</field>
+            <field name="model">ir.model.data.sync.queue</field>
+            <field name="arch" type="xml"> 
+                <tree>
+                    <field name="name"/>
+                    <field name="sequence"/>
+                </tree>
             </field>
         </record>
 
@@ -60,20 +86,5 @@
 
         <menuitem id="connector_sync_queue_menu" name="Synchronism Queue" parent="base.next_id_9" action="action_connector_sync_queue" sequence="15"/>
 
-        <!-- Vistas del modelo ir.model.data -->
-        <record id="connector_couchdb" model="ir.ui.view">
-            <field name="name">ir.model.data_form</field>
-            <field name="model">ir.model.data</field>
-            <field name='inherit_id' ref="base.view_model_data_form"/>
-            <field name="arch" type="xml"> 
-                <group position="before">
-                    <group>
-                        <group>
-                            <field name="_id"/>
-                        </group>
-                    </group>
-                </group>
-            </field>
-        </record>
     </data>
 </openerp>

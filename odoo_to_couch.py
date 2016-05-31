@@ -10,7 +10,7 @@ from toposort import toposort, toposort_flatten
 # Set the enviroment variables
 DATABASE = 'python2'
 SERVER = 'localhost'
-PORT = '8069'
+PORT = '8070'
 USER = 'admin'
 PASSWORD = '123'
 

@@ -2,14 +2,85 @@
 from openerp import models, fields, api
 import couchdb
 import itertools
+import time
+from toposort import toposort, toposort_flatten
 
-couch_database = 'python2'
 
 class IrModelDataSync(models.Model):
     _name = 'ir.model.data.sync'
 
     server = fields.Char(string="Server")
     last_seq = fields.Integer(string="Last Sequence")
+    couch_database = fields.Char(string="CouchDB Database")
+    last_sync_sequence = fields.Integer(string="Last Sync Sequence")
+
+    def translate_sync(self, register):
+        vals = eval(register.vals)
+        result = {}
+        dependences = []
+        for key, val in vals.iteritems():
+            if type(val) == dict:
+                if val['type'] == 'many2one':
+                        external_ids = self.env['ir.model.data'].search([
+                            ('model','=',val['relation']),
+                            ('res_id','=',val['value'])
+                            ], limit=1).complete_name or ""
+                        val['value'] = external_ids
+                        dependences.append(external_ids)
+                elif val['type'] == 'many2many':
+                    external_ids = []
+                    for value in val['value']:
+                        external_id = self.env['ir.model.data'].search([
+                            ('model','=',val['relation']),
+                            ('res_id','=',value)
+                            ],limit=1).complete_name
+                        external_ids.append(external_id)
+                        dependences.append(external_id)
+                    val['value'] = external_ids
+                elif val['type'] == 'one2many':
+                    continue
+            if vals['odoo_model'] == 'mail.message':
+                result['res_id'] =self.env[vals['model']].browse(vals['res_id']).get_xml_id().values()[0]
+                dependences.append(result['res_id'])
+
+            if vals['odoo_model'] == 'mail.followers':
+                result['res_id'] =self.env[vals['res_model']].browse(vals['res_id']).get_xml_id().values()[0]
+                dependences.append(result['res_id'])
+            result[key] = val
+        return result, dependences
+
+    @api.multi
+    def set_sequence(self):
+        sequence = 0
+        dependences = {}        
+        names = []
+        source_ids = {}
+        this_ids = []
+        for change in self.env['ir.model.data.sync.queue'].search([]):
+            data_translated = self.translate_sync(change)
+            change.vals = data_translated[0]
+            dependences[change.name] = data_translated[1]
+            names.append(change.name)
+        for name in names:
+            match_dependences = list(set(names) & set(dependences[name]))
+            source_ids[name] = set(match_dependences)
+        ordered_list = toposort_flatten(source_ids)
+        count = 0
+        for name in ordered_list:
+            for queue in self.env['ir.model.data.sync.queue'].search([
+                ('name','=',name)
+                ]):
+                queue.sequence = sequence
+                sequence += 1
+        #return all_sequence
+
+    @api.multi
+    def send_changes_to_couch(self):
+        self.set_sequence()
+        for change in self.env['ir.model.data.sync.queue'].search([], order='sequence'):
+            print "sequence: %s name %s"%(change.sequence, change.name)
+            #change.send_to_couch()
+        return True
 
     @api.multi
     def create_couch2(self, res_id):
@@ -33,7 +104,7 @@ class IrModelDataSync(models.Model):
     @api.model
     def create_couch(self, xmlid):     
         couch = couchdb.Server()
-        db = couch[couch_database]
+        db = couch[self.couch_database]
         
         if xmlid.res_id == 0:
             return
@@ -63,16 +134,12 @@ class IrModelDataSync(models.Model):
         if not xmlid._id:
             xmlid._id =  doc['_id']
         xmlid.synchronized = True
-        # Resend data
-        #if len(formated_fields[1])>0:
-        #    for one_xmlid in formated_fields[1]:
-        #        self.create_couch(one_xmlid)
         return True
 
     @api.model
     def write_couch(self, xmlid, vals):     
         couch = couchdb.Server()
-        db = couch[couch_database]
+        db = couch[self.couch_database]
         
         if xmlid.res_id == 0:
             return
@@ -121,7 +188,7 @@ class IrModelDataSync(models.Model):
     @api.model
     def unlink_couch(self, xmlid, vals):     
         couch = couchdb.Server()
-        db = couch[couch_database]
+        db = couch[self.couch_database]
         if xmlid.unlinked:
             if '_id' in doc:
                 #if this already exist in couchdb, mark it to as unlinked
@@ -129,6 +196,57 @@ class IrModelDataSync(models.Model):
                 db.save(doc)
                 print "delete %s"%xmlid.complete_name
             #self.unlink()
+        return True
+
+    def create_external_id(self, model, res_id):
+        """ Return a valid xml_id for the record ``self``. """
+        ir_model_data = self.env['ir.model.data']
+        exiting_external_id = ir_model_data.search([('model','=',model),('res_id','=',res_id)], limit=1)
+        if exiting_external_id:
+            return exiting_external_id.complete_name
+        server = self.env['ir.model.data.sync'].browse(1).server
+        postfix = 0
+        name = '%s_%s' % (model.replace('.','_'), res_id)
+        
+        while ir_model_data.search([('module', '=', server), ('name', '=', name)]):
+            postfix += 1
+            name = '%s_%s_%s' % (model, res_id, postfix)
+        ir_model_data.create({
+            'model': model,
+            'res_id': res_id,
+            'module': server,
+            'name': name,
+        })
+        return server + '.' + name
+
+    @api.multi
+    def create_xmlid_for_everything(self):   
+        """
+        Create XMLID for every register in every model
+        """  
+
+        dont_sync_models = ['ir.model.data', 'ir.model.data.sync']
+        models = []
+
+        for model in self.env['ir.model'].search([
+            ('osv_memory','!=',True),
+            ('name','not in',dont_sync_models)
+            ]):
+            if not self.env['ir.model.fields'].search([
+                ('model_id','=',model.id),
+                ('name','=','write_date')
+                ]):
+                continue
+            registers = self.env[model.model].search([])
+            for register in registers:
+                #the register already have xml id
+                if self.env['ir.model.data'].search([
+                    ('model','=',model.model),
+                    ('res_id','=',register.id)
+                    ]):
+                    continue
+                xml_id = self.create_xml_id(model.model, register.id)
+                print "Creating external id %s"%xml_id
         return True
 
     @api.multi
@@ -144,12 +262,12 @@ class IrModelDataSync(models.Model):
 
         print "Preparing all data"
         couch = couchdb.Server()
-        db = couch[couch_database]
+        db = couch[self.couch_database]
+        server = self.server
         dont_sync_models = ['ir.model.data', 'ir.model.data.sync', 'ir.model.data.sync.queue']
         all_models = self.env['ir.model'].search([
             ('osv_memory','=',False),
             ('model','not in', dont_sync_models),
-            #('model','in', ['res.users'])
             ])
         unused_fields = ['id', '__last_update', 'global']
         
@@ -163,96 +281,46 @@ class IrModelDataSync(models.Model):
             for record in all_records:
                 all_fields = record._fields
                 external_id = record.get_external_id().values()[0]
-                all_values = db.get(external_id) or {'_id': external_id}
-                tmp_doc = all_values.copy()
+                all_values = db.get(external_id) or {'_id': external_id, 'odoo_model': model.model}
+                #tmp_doc = all_values.copy()
 
                 for field in all_fields:
                     if field in unused_fields or not eval('record.'+field):
                         continue
                     if all_fields[field].type == 'many2one':
                         field_external_id = eval('record.'+field).get_external_id().values()[0]
-                        all_values[field] = field_external_id
+                        all_values[field+'/id'] = field_external_id
                     elif all_fields[field].type == 'one2many':
                         continue
                     elif all_fields[field].type == 'many2many':
-                        all_values[field] = eval('record.'+field).get_external_id().values()
+                        field_external_ids = ""
+                        for field_external_id in eval('record.'+field).get_external_id().values():
+                            field_external_ids += field_external_id+","
+                        all_values[field+'/id'] = field_external_ids[:-1]
                     elif all_fields[field].type == 'reference':
-                        #TODO: FIX this
-                        print "reference"
-                        continue
+                        field_register = eval('record.'+field)                        
+                        reference = {
+                            'type': 'reference',
+                            'relation': field_register._name,
+                            'external_id': field_register.get_external_id().values()[0]
+                            }
+                        all_values[field] = reference
+                        print reference
                     else:
                         all_values[field] = eval('record.'+field)
-                print 'external_id %s'%all_values['_id']
-                if tmp_doc != all_values.copy():
-                    db.save(all_values)
-        return True  
+                #if tmp_doc != all_values.copy():
+                print 'Sending document %s'%all_values['_id']
+                db.save(all_values)
+        return True
 
     @api.multi
-    def send_all_to_couch_old(self):  
-        print "Start Sending all to couchdb"   
-        couch = couchdb.Server()
-        #db = couch[self.pool.db.dbname]
-        db = couch[couch_database]
-
-        dont_sync_models = ['ir.model.data', 'ir.model.data.sync', 'ir.model.data.sync.queue']
-
-        # This is to avoid and unnecessary models
-        for model in self.env['ir.model'].search([('osv_memory','=',True)]):
-            dont_sync_models.append(model.name)
-
-        print "Will send all except:\n%s"%dont_sync_models
-        xmlid_list = self.env['ir.model.data'].search([
-            ('synchronized','=', False),
-            ('model', 'not in' , dont_sync_models),
-            ])
-        
-        for xmlid in xmlid_list:
-            self.create_couch(xmlid)
-        return True  
+    def first_time(self):
+        self.create_xmlid_for_everything()
+        self.send_all_to_couch()
+        return True
 
     @api.multi
-    def create_xmlid_for_everything(self):   
-        """
-        Create XMLID for every register in every model
-        """  
-
-        dont_sync_models = ['ir.model.data', 'ir.model.data.sync']
-        models = []
-
-        for model in self.env['ir.model'].search([
-            ('osv_memory','!=',True),
-            ('name','not in',dont_sync_models)
-            ]):
-            #print "Model: %s"%(model.model)
-            if not self.env['ir.model.fields'].search([('model_id','=',model.id),('name','=','write_date')]):
-                continue
-            #try:
-            registers = self.env[model.model].search([])
-            #except:
-            #    print "Problemas en %s"%model.model
-            #    self.env.cr.rollback()
-            #    continue
-            for register in registers:
-                #the register already have xml id
-                if self.env['ir.model.data'].search([
-                    ('model','=',model.model),
-                    ('res_id','=',register.id)
-                    ]):
-                    continue
-                xml_id = self.create_xml_id(model.model, register.id)
-                #self.env.cr.commit()
-                #xml_id = register.__export_xml_id()
-                #print "ID: %s, XML_ID: %s"%(register.id, xml_id)
-                
-        return True 
-
-    @api.multi
-    def import_doc(self, doc):     
-        couch = couchdb.Server()
-        #db = couch[self.pool.db.dbname]
-        db = couch[couch_database]
-
-        #print "modelo = %s"%doc
+    def import_doc(self, doc):
         if doc['odoo_model'] == 'im_chat.message':
             from_uid = self.env.ref(doc['from_id']['id']).id
             uuid = self.env.ref(doc['to_id']['id']).uuid
@@ -283,75 +351,30 @@ class IrModelDataSync(models.Model):
                 if key in reserved_fields:
                     continue
                 if type(value) is dict:
-                    if value['type'] == 'many2one':
-                        vals[key+"/id"] = value['id']
-
-                    elif value['type'] == 'one2many':
-                        continue
-
-                    elif value['type'] == 'many2many':
-                        if len(value['ids']) == 0:
-                            continue
-                        many_ids = ""
-                        for one_xmlid in value['ids']:
-                            many_ids += one_xmlid+","
-                        vals[key+"/id"] = many_ids[:-1] # This remove the last ","
-
                     if value['type'] == 'reference':
-                        registro = self.env.ref(value['id'])
+                        registro = self.env.ref(value['external_id'])
                         vals[key] = "%s,%s"%(value['relation'], registro.id)
+                        continue
 
+                if key == '_id':
+                    vals['id'] = value
+                elif key == 'odoo_model':
+                    model = value
                 else:
-
-                    if key == 'xml_id':
-                        continue
-                    elif key == '_id':
-                        continue
-                    elif key == 'odoo_model':
-                        model = value
-                    elif key == 'model':  #TODO: Remove this! It's just a temporary fix, Remove this after new database
-                        if not 'odoo_model' in doc:
-                            model = value
-                        else:
-                            vals[key] = value
-
+                    if type(value) == bool and value==True:
+                        vals[key] = str(value)
+                    elif value == False:
+                        vals.pop(key, None)
                     else:
-                        if type(value) == bool and value==True:
-                            vals[key] = str(value)
-                        elif value == False:
-                            vals.pop(key, None)
-                        else:
-                            vals[key] = value
-
-            vals['id'] = doc['xml_id']
+                        vals[key] = value
             
             #correct the local value for the chatter
             if model == 'mail.message':
                 vals['res_id'] = self.env.ref(doc['res_xmlid']).id
                 vals.pop('res_xmlid', None)
-            else:
-                vals.pop('model', None)
-            #print "XML_ID: %s"%doc['xml_id']
-            print "model=%s"%model
-            print "vals: %s"%vals
-            res = self.env[model].with_context({'synchronized': True, 'tracking_disable': True, 'mail_create_nosubscribe': True}).load(vals.keys(),[vals.values()])
-        return res        
 
-    def create_xml_id(self, model, id):
-        """ Return a valid xml_id for the record ``self``. """
-        postfix = 0
-        name = '%s_%s' % (model, id)
-        ir_model_data = self.env['ir.model.data']
-        while ir_model_data.search([('module', '=', 'export__'), ('name', '=', name)]):
-            postfix += 1
-            name = '%s_%s_%s' % (model, id, postfix)
-        ir_model_data.create({
-            'model': model,
-            'res_id': id,
-            'module': 'export__',
-            'name': name,
-        })
-        return 'export__.' + name
+            res = self.env[model].with_context({'synchronized': True, 'tracking_disable': True, 'mail_create_nosubscribe': True}).load(vals.keys(),[vals.values()])
+        return res  
 
     @api.model
     def format_fields(self, local_record, xmlid, field_list):
@@ -439,22 +462,28 @@ class IrModelDataSync(models.Model):
 class IrModelDataSyncQueue(models.Model):
     _name = 'ir.model.data.sync.queue'
 
-    #xml_id = fields.Many2one('ir.model.data', string="Document XML ID")
-    name = fields.Char(string='Name')
+    name = fields.Char(string='External ID', required=True,)
     vals = fields.Text(string="Values")
-    #_id = fields.Char(string="Global ID")
-    method = fields.Selection([
-        ('create','Create'),
-        ('write','Write'),
-        ('unlink','Remove')
-        ], string="Method")
+    sequence = fields.Integer(string="Sync Sequence")
+    #second_sequence = fields.Integer(string="Second Sequence")
+    #dependences = fields.Char(string="Dependences")
+    #method = fields.Selection([
+    #    ('create','Create'),
+    #    ('write','Write'),
+    #    ('unlink','Remove')
+    #    ], string="Method")
 
-
-class IrModelData(models.Model):
-    _inherit = 'ir.model.data'
-
-    _id = fields.Char(string="Global ID")
-    synchronized = fields.Boolean(string="Synchornized")
-    unlinked = fields.Boolean(string="Unlinked") 
-
-
+    @api.multi
+    def send_to_couch(self):
+        self.ensure_one()    
+        couch = couchdb.Server()
+        couch_database = self.env.ref('connector_sync.config').couch_database
+        #print couch_database
+        db = couch[couch_database]
+        #print self.name
+        vals = db.get(self.name) or {'_id': self.name}
+        for key, val in eval(self.vals).iteritems():
+            vals[key] = val
+        db.save(vals)
+        self.unlink()
+        return True
