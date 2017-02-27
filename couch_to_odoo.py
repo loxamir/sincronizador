@@ -28,13 +28,13 @@ couch = couchdb.Server()
 db = couch[sync_data.couch_database]
 
 retry_ids = []
-for changes in db.changes(feed='continuous',heartbeat='1000',include_docs=True, since=last_seq):
-    #if changes['doc']['server'] != server:
-    #changes['doc'].pop('server', None)
-    print "%s - Importing %s"%(changes['seq'],changes['doc']['_id'])
-    importation =  sincronizador.import_doc([1], changes['doc'])
+for changes in db.changes(
+        feed='continuous', heartbeat='1000', include_docs=True,
+        since=last_seq):
+    # if changes['doc']['server'] != server:
+    # changes['doc'].pop('server', None)
+    print "%s - Importing %s" % (changes['seq'], changes['doc']['_id'])
+    importation = sincronizador.import_doc([1], changes['doc'])
     if importation:
         sync_data.last_seq = changes['seq']
     print importation
-
-
