@@ -14,7 +14,7 @@ Technical skils ;)
 3 - pip install couchdb
 4 - pip install toposort
 5 - Install the module "connector_sincronizador" on Odoo
-6 - Go to Settings/Technical/Database Structure/Synchronism, Click on the button "First Time" and wait it finish
+6 - Go to Settings/Technical/Database Structure/Synchronism, complete the form and Click on the button "First Time" and wait it finish
 7 - Go to your couchdb and check the new coudhdb database with all your odoo documents, now all your changes to odoo documents will be sent to couchdb (The odoo documents will be referenced by it's XML IDs on Couchdb)
 8 - Go to Settings/Technical/Database Structure/Synchronism and Click on the button "Get Sync Continuous"(this will never end, so open other browser tab)
 9 - Change the admin username on Odoo and see the changes on Couchdb
