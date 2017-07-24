@@ -1,9 +1,10 @@
 # -*- encoding: utf-8 -*-
 {
-    'name': 'Connector Sync',
+    'name': 'Realtime Sync',
     'description': """
 
-    Connector Sync
+    Makes possible realtime Odoo syncronization between databases
+    and store all changes with versioning
 
     """,
     'category': 'Base',
@@ -14,8 +15,7 @@
         'base',
     ],
     'data': [
-        #'security/groups.xml',
-        #'security/ir.model.access.csv',
+        'security/ir.model.access.csv',
         'views/connector_sync.xml',
         'views/ir_model.xml',
     ],

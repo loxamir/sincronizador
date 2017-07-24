@@ -23,14 +23,19 @@ class IrModelDataSync(models.Model):
         string="Couchdb port",
         default="5984",
         )
-    couch_database = fields.Char(
+    couchdb_username = fields.Char(
+        string="Couchdb Username",
+        default="",
+        )
+    couchdb_password = fields.Char(
+        string="Couchdb Password",
+        default="",
+        )
+    couchdb_database = fields.Char(
         string="CouchDB Database",
         )
     last_seq = fields.Char(
         string="Last Sequence",
-        )
-    last_sync_sequence = fields.Integer(
-        string="Last Sync Sequence",
         )
 
     def translate_sync(self, register):
@@ -58,7 +63,6 @@ class IrModelDataSync(models.Model):
                     val['value'] = external_ids
                 elif val['type'] == 'one2many':
                     continue
-            print vals
             if vals['odoo_model'] == 'mail.message':
                 result['res_id'] = self.env[vals['model']].browse(
                     vals['res_id']).get_xml_id().values()[0]
@@ -73,22 +77,25 @@ class IrModelDataSync(models.Model):
 
     @api.multi
     def get_data_continuos(self):
-        #user = odoo.env.user
         sync_data = self.env.ref('connector_sincronizador.config')
-        hostname = sync_data.hostname
         last_seq = sync_data.last_seq
+        user = sync_data.couchdb_user
+        password = sync_data.couchdb_password
         sincronizador = self.env['ir.model.data.sync']
 
         url = "http://%s:%s" % (self.couchdb_server, self.couchdb_port)
         couch = couchdb.Server(url=url)
-        db = couch[sync_data.couch_database]
+        couch.resource.credentials = (user, password)
+        try:
+            db = couch[sync_data.couchdb_database]
+        except:
+            db = couch.create(sync_data.couchdb_database)
 
-        retry_ids = []
         for changes in db.changes(
                 feed='continuous', heartbeat='1000', include_docs=True,
                 since=last_seq):
-            # if changes['doc']['hostnamke'] != hostname:
-            # changes['doc'].pop('hostnamke', None)
+            # if changes['doc']['hostname'] != hostname:
+            # changes['doc'].pop('hostname', None)
             print "%s - Importing %s" % (changes['seq'], changes['doc']['_id'])
             importation = sincronizador.import_doc(changes['doc'])
             if importation:
@@ -102,7 +109,6 @@ class IrModelDataSync(models.Model):
         dependences = {}
         names = []
         source_ids = {}
-        # this_ids = []
         for change in self.env['ir.model.data.sync.queue'].search([]):
             data_translated = self.translate_sync(change)
             change.vals = data_translated[0]
@@ -112,13 +118,11 @@ class IrModelDataSync(models.Model):
             match_dependences = list(set(names) & set(dependences[name]))
             source_ids[name] = set(match_dependences)
         ordered_list = toposort_flatten(source_ids)
-        #count = 0
         for name in ordered_list:
             for queue in self.env['ir.model.data.sync.queue'].search([
                     ('name', '=', name)]):
                 queue.sequence = sequence
                 sequence += 1
-        # return all_sequence
 
     @api.multi
     def send_changes_to_couch(self):
@@ -129,31 +133,18 @@ class IrModelDataSync(models.Model):
             change.send_to_couch()
         return True
 
-    @api.multi
-    def create_couch2(self, res_id):
-        register = self.env['ir.model.data.sync.queue'].search([
-            ('id', '=', res_id)])
-        xmlid_split = register.name.split('.')
-        texto = xmlid_split[1]
-        if len(xmlid_split) > 2:
-            texto = ""
-            for text in xmlid_split[1:]:
-                texto = texto+"."+text
-
-        print texto
-        xml_id_record = self.env['ir.model.data'].search([
-            ('module', '=', xmlid_split[0]),
-            ('name', '=', texto)
-            ])
-        self.create_couch(xml_id_record)
-        register.unlink()
-        return True
-
     @api.model
     def create_couch(self, xmlid):
         url = "http://%s:%s" % (self.couchdb_server, self.couchdb_port)
         couch = couchdb.Server(url=url)
-        db = couch[self.couch_database]
+        sync_data = self.env.ref('connector_sincronizador.config')
+        user = sync_data.couchdb_user
+        password = sync_data.couchdb_password
+        couch.resource.credentials = (user, password)
+        try:
+            db = couch[self.couchdb_database]
+        except:
+            db = couch.create(self.couchdb_database)
 
         if xmlid.res_id == 0:
             return
@@ -193,7 +184,14 @@ class IrModelDataSync(models.Model):
     def write_couch(self, xmlid, vals):
         url = "http://%s:%s" % (self.couchdb_server, self.couchdb_port)
         couch = couchdb.Server(url=url)
-        db = couch[self.couch_database]
+        sync_data = self.env.ref('connector_sincronizador.config')
+        user = sync_data.couchdb_user
+        password = sync_data.couchdb_password
+        couch.resource.credentials = (user, password)
+        try:
+            db = couch[self.couchdb_database]
+        except:
+            db = couch.create(self.couchdb_database)
 
         if xmlid.res_id == 0:
             return
@@ -217,7 +215,6 @@ class IrModelDataSync(models.Model):
                     ('name', '=', field),
                     ])
                 field_list.append(field_obj)
-                # xmlid.model.field_id.field
 
         formated_fields = self.format_fields(local_record, xmlid, field_list)
         doc = dict(doc.items() + formated_fields.items())
@@ -237,24 +234,26 @@ class IrModelDataSync(models.Model):
             xmlid._id = doc['_id']
         xmlid.synchronized = True
 
-        # Resend one2many fields
-        #if len(formated_fields[1])>0:
-        #    for one_xmlid in formated_fields[1]:
-        #        self.write_couch(one_xmlid)
         return True
 
     @api.model
     def unlink_couch(self, xmlid, vals):
         url = "http://%s:%s" % (self.couchdb_server, self.couchdb_port)
         couch = couchdb.Server(url=url)
-        db = couch[self.couch_database]
+        sync_data = self.env.ref('connector_sincronizador.config')
+        user = sync_data.couchdb_user
+        password = sync_data.couchdb_password
+        couch.resource.credentials = (user, password)
+        try:
+            db = couch[self.couchdb_database]
+        except:
+            db = couch.create(self.couchdb_database)
         if xmlid.unlinked:
             if '_id' in doc:
-                #if this already exist in couchdb, mark it to as unlinked
+                # if this already exist in couchdb, mark it to as unlinked
                 doc['unlinked'] = True
                 db.save(doc)
                 print "delete %s" % xmlid.complete_name
-            #self.unlink()
         return True
 
     def create_xml_id(self, model, res_id):
@@ -291,9 +290,11 @@ class IrModelDataSync(models.Model):
         """
 
         dont_sync_models = [
-            'ir.model.data', 'ir.model.data.sync', 'ruc.list',
-            'ir.attachments']
-        #models = []
+            'ir.model.data',
+            'ir.model.data.sync',
+            'ruc.list',
+            'ir.attachments',
+            ]
 
         for model in self.env['ir.model'].search([
                 ('osv_memory', '!=', True),
@@ -322,24 +323,23 @@ class IrModelDataSync(models.Model):
         """
         All register have to have external_id
         """
-        # Time with couchdb saving ervery register 6:55
-        # Time without couchdb 0:25
-        # Time saving in every model 3:15
-        # Time saving just at the end: 3:11
-        # Conclusion: the command db.get(external_id) is what make this slow
-
         print "Preparing all data"
         url = "http://%s:%s" % (self.couchdb_server, self.couchdb_port)
         couch = couchdb.Server(url=url)
-        #db = couch[self.couch_database]
+        sync_data = self.env.ref('connector_sincronizador.config')
+        user = sync_data.couchdb_user
+        password = sync_data.couchdb_password
+        couch.resource.credentials = (user, password)
         try:
-            db = couch[self.couch_database]
+            db = couch[self.couchdb_database]
         except:
-            db = couch.create(self.couch_database)
-        # server = self.server
+            db = couch.create(self.couchdb_database)
         dont_sync_models = [
-            'ir.model.data', 'ir.model.data.sync', 'ir.model.data.sync.queue',
-            'ruc.list', 'ir.attachments']
+            'ir.model.data',
+            'ir.model.data.sync',
+            'ir.model.data.sync.queue',
+            'ruc.list', 'ir.attachments',
+            ]
         all_models = self.env['ir.model'].search([
             ('osv_memory', '=', False),
             ('model', 'not in', dont_sync_models),
@@ -429,14 +429,6 @@ class IrModelDataSync(models.Model):
                             and key == exception['field']:
                         ignore_field = True
                         continue
-                '''this_model_id = self.env['ir.model'].search([
-                    ('model', '=', doc['odoo_model']),
-                    ]).id
-                if self.env['ir.model.fields'].search([
-                    ('name', '=', key),
-                    ('model_id', '=', this_model_id)
-                ]).readonly:
-                    continue'''
                 if ignore_field:
                     continue
 
@@ -475,7 +467,6 @@ class IrModelDataSync(models.Model):
 
     @api.model
     def format_fields(self, local_record, xmlid, field_list):
-        # resend_ids = []
         doc = {}
         for field in field_list:
             # This comparation is usefull to make the process faster and
@@ -510,9 +501,6 @@ class IrModelDataSync(models.Model):
                         ('res_id', '=', one_id.id),
                         ], limit=1)
                     many_ids.append(field_xmlid.complete_name)
-                    # resend_ids.append(field_xmlid)
-                    # print resend_ids
-                #    self.send_to_couch(field_xmlid)
                 value = {
                     'type': field.ttype,
                     'relation': field.relation,
@@ -536,7 +524,6 @@ class IrModelDataSync(models.Model):
             elif field.ttype == 'reference':
                 # TODO: Test this
                 field_content = eval('local_record.'+field.name)
-                # print "field %s--content %s"%(field.name, field_content.name)
                 if not field_content:
                     continue
                 relation = field_content._name
@@ -558,7 +545,7 @@ class IrModelDataSync(models.Model):
                 else:
                     value = eval('local_record.'+field.name)
             doc[field.name] = value
-        return doc  # , resend_ids
+        return doc
 
 
 class IrModelDataSyncQueue(models.Model):
@@ -567,13 +554,6 @@ class IrModelDataSyncQueue(models.Model):
     name = fields.Char(string='External ID', required=True,)
     vals = fields.Text(string="Values")
     sequence = fields.Integer(string="Sync Sequence")
-    # second_sequence = fields.Integer(string="Second Sequence")
-    # dependences = fields.Char(string="Dependences")
-    '''method = fields.Selection([
-        ('create', 'Create'),
-        ('write', 'Write'),
-        ('unlink', 'Remove')
-        ], string="Method")'''
 
     @api.multi
     def send_to_couch(self):
@@ -581,9 +561,13 @@ class IrModelDataSyncQueue(models.Model):
         config = self.env.ref('connector_sincronizador.config')
         url = "http://%s:%s" % (config.couchdb_server, config.couchdb_port)
         couch = couchdb.Server(url=url)
-        # print couch_database
-        db = couch[config.couch_database]
-        # print self.name
+        user = config.couchdb_user
+        password = config.couchdb_password
+        couch.resource.credentials = (user, password)
+        try:
+            db = couch[config.couchdb_database]
+        except:
+            db = couch.create(config.couchdb_database)
         vals = db.get(self.name) or {'_id': self.name}
         for key, val in eval(self.vals).iteritems():
             vals[key] = val

@@ -3,10 +3,9 @@
     <data>
 
         <record id="config" model="ir.model.data.sync">
-            <field name="server">server-config</field>
+            <field name="hostname">odoo</field>
             <field name="last_seq">0</field>
-            <field name="couch_database">python2</field>
-            <field name="last_sync_sequence">2</field>
+            <field name="couchdb_database">odoo</field>
         </record>
 
         <record id="connector_sync" model="ir.ui.view">
@@ -15,11 +14,10 @@
             <field name="arch" type="xml">
                 <form>
                     <header>
-
                         <!--button name="create_xmlid_for_everything" string="Create External ID for everything" type="object"/>
                         <button name="send_all_to_couch" string="Send All To Couch" type="object"/-->
-                        <button name="first_time" string="Primera vez" type="object"/>
-                        <button name="send_changes_to_couch" string="Send all changes" type="object"/>
+                        <button name="first_time" string="First Time" type="object"/>
+                        <!--button name="send_changes_to_couch" string="Send all changes" type="object"/-->
                         <button name="get_data_continuos" string="Get Sync Continuous" type="object"/>
                     </header>
                     <group>
@@ -27,11 +25,12 @@
                             <field name="hostname"/>
                             <field name="couchdb_server"/>
                             <field name="couchdb_port"/>
-                            <field name="couch_database"/>
+                            <field name="couchdb_user"/>
+                            <field name="couchdb_password"/>
+                            <field name="couchdb_database"/>
                         </group>
                         <group>
                             <field name="last_seq"/>
-                            <field name="last_sync_sequence"/>
                         </group>
                     </group>
                 </form>

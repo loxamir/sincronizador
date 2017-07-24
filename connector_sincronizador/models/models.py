@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from openerp import models, api
 import itertools
+import logging
+
+_logger = logging.getLogger(__name__)
 
 # special columns automatically created by the ORM
 LOG_ACCESS_COLUMNS = ['create_uid', 'create_date', 'write_uid', 'write_date']
@@ -16,15 +19,23 @@ part that is relevant
 
 
 class BaseModelCouch(models.Model):
+    _name = 'base.model.couch'
     self = models.BaseModel
 
     @api.model
     @api.returns('self', lambda value: value.id)
     def create_couch(self, vals):
-        print "create(%s)" % vals
-        sync_model = self.env['ir.model'].search([
-            ('name', '=', 'ir.model.data.sync')
-        ])
+        try:
+            module = self.env['ir.module.module'].search([
+                    ('name', '=', 'connector_sincronizador')
+                    ])
+        except:
+            module = False
+        print "create %s %s" % (module, self._context)
+        if module and module.state == 'installed':
+            sync_model = True
+        else:
+            sync_model = False
         """ create(vals) -> record
 
         Creates a new record for the model.
@@ -119,10 +130,17 @@ class BaseModelCouch(models.Model):
 
     @api.multi
     def write_couch(self, vals):
-        print "write(%s)" % vals
-        sync_model = self.env['ir.model'].search([
-            ('name', '=', 'ir.model.data.sync')
-        ])
+        try:
+            module = self.env['ir.module.module'].search([
+                    ('name', '=', 'connector_sincronizador')
+                    ])
+        except:
+            module = False
+        print "write %s" % module
+        if module and module.state == 'installed':
+            sync_model = True
+        else:
+            sync_model = False
         """ write(vals)
 
         Updates all records in the current set with the provided values.
@@ -262,6 +280,7 @@ class BaseModelCouch(models.Model):
             'ir.model.data.sync.queue',
             'im_chat.presence',
             ]
+        print "sync_model %s" % sync_model
         if sync_model \
                 and self._name not in dont_sync_models \
                 and not self._transient \

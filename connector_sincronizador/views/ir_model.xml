@@ -9,9 +9,6 @@
              <field name="arch" type="xml">
                  <field name="modules" position="after">
                      <field name="sincronizable"/>
-                     <!--field name="couch_seq"/>
-                     <button name="action_sync_to_couchdb" type="object" string="Enviar"/>
-                     <button name="action_sync_from_couchdb" type="object" string="Recibir"/-->
                  </field>
              </field>
         </record>
