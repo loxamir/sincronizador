@@ -1,10 +1,10 @@
-# Sincronizador Online/Offline
+# Synchronize your Odoo and get tracking of all changes
 
-The Sincronizador allow the user work locally with a server and synchronize the data in real time while there's internet, when the internet goes down it keep the system working and synchronize every document when the internet came back.
+This module allow the user work locally with a server and synchronize the data in real time while there's internet, when the internet goes down it keep the system working and synchronize every document when the internet came back.
 
-Have a track of every change made on odoo documents with coudhdb version system
+Have a track of every change made on odoo documents with coudhdb version system, The odoo documents will be referenced by it's XML IDs on Couchdb
 
-# The requisites:
+# The prerequisites:
 Working Couchdb 2 server
 
 Working Odoo 8 server
@@ -25,7 +25,7 @@ Technical skils ;)
 
 6 - Go to Settings/Technical/Database Structure/Synchronism, complete the form and Click on the button "First Time" and wait it finish
 
-7 - Go to your couchdb and check the new coudhdb database with all your odoo documents, now all your changes to odoo documents will be sent to couchdb (The odoo documents will be referenced by it's XML IDs on Couchdb)
+7 - Go to your couchdb and check the new coudhdb database with all your odoo documents, now all your changes to odoo documents will be sent to couchdb
 
 8 - Go to Settings/Technical/Database Structure/Synchronism and Click on the button "Get Sync Continuous"(this will never end, so open other browser tab)
 
@@ -40,6 +40,6 @@ Just use the odoo, all the changes made on one database will be synchronized in 
 
 This modules also can be used to realtime backup
 
-
 # Need help?
 I work for 10 Dolares per hour, so it's cheap, contact at loxamir@gmail.com
+
