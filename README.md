@@ -10,6 +10,7 @@ Technical skils ;)
 
 # How to install
 1 - Clone this repository
+
 2 - Copy the directory "connector_sincronizador" to your odoo addons directory
 3 - pip install couchdb
 4 - pip install toposort
