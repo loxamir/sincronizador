@@ -5,11 +5,11 @@ import couchdb
 import odoorpc
 
 # Set the enviroment variables
-DATABASE = 'sincronizador31'
+DATABASE = 'nodoo1'
 SERVER = 'localhost'
-PORT = '8070'
+PORT = '80'
 USER = 'admin'
-PASSWORD = '123'
+PASSWORD = 'admin'
 
 # Prepare the connection to the server
 odoo = odoorpc.ODOO(SERVER, port=PORT)
@@ -20,7 +20,7 @@ odoo.login(DATABASE, USER, PASSWORD)
 # Current user
 user = odoo.env.user
 sync_data = odoo.env['ir.model.data.sync'].browse(1)
-server = sync_data.server
+hostname = sync_data.hostname
 last_seq = sync_data.last_seq
 sincronizador = odoo.env['ir.model.data.sync']
 
@@ -31,8 +31,8 @@ retry_ids = []
 for changes in db.changes(
         feed='continuous', heartbeat='1000', include_docs=True,
         since=last_seq):
-    # if changes['doc']['server'] != server:
-    # changes['doc'].pop('server', None)
+    # if changes['doc']['hostnamke'] != hostname:
+    # changes['doc'].pop('hostnamke', None)
     print "%s - Importing %s" % (changes['seq'], changes['doc']['_id'])
     importation = sincronizador.import_doc([1], changes['doc'])
     if importation:

@@ -17,6 +17,7 @@
         #'security/groups.xml',
         #'security/ir.model.access.csv',
         'views/connector_sync.xml',
+        'views/ir_model.xml',
     ],
     'installable': True,
     'application': False,

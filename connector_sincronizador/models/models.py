@@ -6,21 +6,25 @@ import itertools
 LOG_ACCESS_COLUMNS = ['create_uid', 'create_date', 'write_uid', 'write_date']
 MAGIC_COLUMNS = ['id'] + LOG_ACCESS_COLUMNS
 
-''' 
+'''
 Should be a better way to do that
-becouse this way it overides the 
-methods but there's should be an 
-way to inherit it and just add the 
+because this way it overides the
+methods but there's should be an
+way to inherit it and just add the
 part that is relevant
 '''
 
-class BaseModelSync(models.Model):
-    self = models.BaseModel
 
+class BaseModelCouch(models.Model):
+    self = models.BaseModel
 
     @api.model
     @api.returns('self', lambda value: value.id)
-    def create_sync(self, vals):
+    def create_couch(self, vals):
+        print "create(%s)" % vals
+        sync_model = self.env['ir.model'].search([
+            ('name', '=', 'ir.model.data.sync')
+        ])
         """ create(vals) -> record
 
         Creates a new record for the model.
@@ -49,6 +53,7 @@ class BaseModelSync(models.Model):
 
         # split up fields into old-style and pure new-style ones
         old_vals, new_vals, unknown = {}, {}, []
+        vals_sync = {'odoo_model': self._name}
         for key, val in vals.iteritems():
             field = self._fields.get(key)
             if field:
@@ -56,6 +61,18 @@ class BaseModelSync(models.Model):
                     old_vals[key] = val
                 if field.inverse and not field.inherited:
                     new_vals[key] = val
+                if 'synchronized' not in self.env.context \
+                        and sync_model:
+                    # Change the database id by the xml id in relation fields
+                    if field.type == 'many2one':
+                        vals_sync[key] = self.env[field._column_obj].search([
+                            ('id', '=', val)]).get_external_id().values()[0]
+                    elif field.type == 'many2many':
+                        vals_sync[key] = self.env[field._column_obj].search([
+                            ('id', 'in', val[0][2])]
+                            ).get_external_id().values()
+                    else:
+                        vals_sync[key] = val
             else:
                 unknown.append(key)
 
@@ -65,31 +82,47 @@ class BaseModelSync(models.Model):
         # create record with old-style fields
         record = self.browse(self._create(old_vals))
 
-        # put the values of pure new-style fields into cache, and inverse them
+        # put the values of pure new-style fields into cache
         record._cache.update(record._convert_to_cache(new_vals))
+        # mark the fields as being computed, to avoid their invalidation
+        for key in new_vals:
+            self.env.computed[self._fields[key]].add(record.id)
+        # inverse the fields
         for key in new_vals:
             self._fields[key].determine_inverse(record)
+        for key in new_vals:
+            self.env.computed[self._fields[key]].discard(record.id)
 
-        #Create an external id for this record
-        #if record._name not in ['ir.model.data']:
-        dont_sync_models = ['ir.model.data', 'ir.model.data.sync']
-        for model in self.env['ir.model'].search([('osv_memory','=',True)]):
-            dont_sync_models.append(model.name)
-
-        if self._name not in dont_sync_models and 'synchronized' not in self.env.context:
-            #xml_id_record = record.__export_xml_id()
-            xml_id = record.__export_xml_id().split(".")
-            xml_id_record = self.env['ir.model.data'].sudo().search([
-                ('module','=',xml_id[0]),
-                ('name','=',xml_id[1])
-                ])
-            xml_id_record.synchronized = False
-            xml_id_record.sudo().send_this_to_couch()
-        print "Create"
+        dont_sync_models = [
+            'ir.model.data',
+            'ir.model.data.sync',
+            'ir.model.data.sync.queue',
+            'im_chat.presence',
+            ]
+        if not self._transient \
+                and sync_model \
+                and self._name not in dont_sync_models \
+                and 'synchronized' not in self.env.context:
+            if self._name == 'im_chat.message':
+                vals_sync['res_xmlid'] = self.env['ir.model.data'].search([
+                    ('model', '=', record.model),
+                    ('res_id', '=', record.res_id)
+                    ]).get_external_id().values()[0]
+                vals_sync.pop('res_id', None)
+            xml_id = record.__export_xml_id()
+            self.env['ir.model.data.sync.queue'].create({
+                'name': xml_id,
+                'vals': vals_sync,
+                })
         return record
+    models.Model.create = create_couch
 
     @api.multi
-    def write_sync(self, vals):
+    def write_couch(self, vals):
+        print "write(%s)" % vals
+        sync_model = self.env['ir.model'].search([
+            ('name', '=', 'ir.model.data.sync')
+        ])
         """ write(vals)
 
         Updates all records in the current set with the provided values.
@@ -180,6 +213,7 @@ class BaseModelSync(models.Model):
 
         # split up fields into old-style and pure new-style ones
         old_vals, new_vals, unknown = {}, {}, []
+        vals_sync = {'odoo_model': self._name}
         for key, val in vals.iteritems():
             field = self._fields.get(key)
             if field:
@@ -187,6 +221,19 @@ class BaseModelSync(models.Model):
                     old_vals[key] = val
                 if field.inverse and not field.inherited:
                     new_vals[key] = val
+                # Change the database id by the xml id in relation fields
+                if 'synchronized' not in self.env.context \
+                        and sync_model:
+                    print "name: %s - type: %s" % (field.name, field.type)
+                    if field.type == 'many2one':
+                        vals_sync[key] = self.env[field._column_obj].search([
+                            ('id', '=', val)]).get_external_id().values()[0]
+                    elif field.type == 'many2many':
+                        vals_sync[key] = self.env[field._column_obj].search([
+                            ('id', 'in', val[0][2])]
+                            ).get_external_id().values()
+                    else:
+                        vals_sync[key] = val
             else:
                 unknown.append(key)
 
@@ -197,35 +244,78 @@ class BaseModelSync(models.Model):
         if old_vals:
             self._write(old_vals)
 
-        # put the values of pure new-style fields into cache, and inverse them
         if new_vals:
+            # put the values of pure new-style fields into cache
             for record in self:
                 record._cache.update(record._convert_to_cache(new_vals, update=True))
+            # mark the fields as being computed, to avoid their invalidation
+            for key in new_vals:
+                self.env.computed[self._fields[key]].update(self._ids)
+            # inverse the fields
             for key in new_vals:
                 self._fields[key].determine_inverse(self)
 
         # This is to avoid loop and errors
-        dont_sync_models = ['ir.model.data', 'ir.model.data.sync']
-
-        # This is to avoid and unnecessary models
-        for model in self.env['ir.model'].search([('osv_memory','=',True)]):
-            dont_sync_models.append(model.name)
-
-        if self._name not in dont_sync_models and 'synchronized' not in self.env.context:
-            xml_id = self.__export_xml_id().split(".")
-            xml_id_record = self.env['ir.model.data'].sudo().search([
-                ('module','=',xml_id[0]),
-                ('name','=',xml_id[1])
-                ])
-            xml_id_record.synchronized = False
-            xml_id_record.sudo().send_this_to_couch()
-
-        print "Write"
+        dont_sync_models = [
+            'ir.model.data',
+            'ir.model.data.sync',
+            'ir.model.data.sync.queue',
+            'im_chat.presence',
+            ]
+        if sync_model \
+                and self._name not in dont_sync_models \
+                and not self._transient \
+                and 'synchronized' not in self.env.context:
+            for record in self:
+                if self._name == 'im_chat.message':
+                    vals_sync['res_xmlid'] = self.env['ir.model.data'].search([
+                        ('odoo', '=', record.model),
+                        ('res_id', '=', record.res_id)
+                        ]).get_external_id().values()[0]
+                    vals_sync.pop('res_id', None)
+                xml_id = record.get_external_id().values()[0]
+                if not xml_id:
+                    xml_id = record.__export_xml_id()
+                self.env['ir.model.data.sync.queue'].create({
+                    'name': xml_id,
+                    'vals': vals_sync,
+                })
 
         return True
+    models.Model.write = write_couch
 
+    def __export_xml_id(self):
+        """ Return a valid xml_id for the record ``self``. """
+        if not self._is_an_ordinary_table():
+            raise Exception(
+                "You can not export the column ID of model %s, because the "
+                "table %s is not an ordinary table."
+                % (self._name, self._table))
+        ir_model_data = self.sudo().env['ir.model.data']
+        data = ir_model_data.search([
+            ('model', '=', self._name), ('res_id', '=', self.id)])
+        if data:
+            if data[0].module:
+                return '%s.%s' % (data[0].module, data[0].name)
+            else:
+                return data[0].name
+        else:
+            postfix = 0
+            name = '%s_%s' % (self._table, self.id)
+            while ir_model_data.search([
+                    ('module', '=', 'export__'), ('name', '=', name)]):
+                postfix += 1
+                name = '%s_%s_%s' % (self._table, self.id, postfix)
+            ir_model_data.create({
+                'model': self._name,
+                'res_id': self.id,
+                'module': 'export__',
+                'name': name,
+            })
+            return 'export__.' + name
+    models.Model.__export_xml_id = __export_xml_id
 
-    def unlink_sync(self, cr, uid, ids, context=None):
+    '''def unlink_couch(self, cr, uid, ids, context=None):
         """ unlink()
 
         Deletes the records of the current set
@@ -235,7 +325,7 @@ class BaseModelSync(models.Model):
         :raise UserError: if the record is default property for other records
 
         """
-        '''if not ids:
+        if not ids:
             return True
         if isinstance(ids, (int, long)):
             ids = [ids]
@@ -314,40 +404,8 @@ class BaseModelSync(models.Model):
                     obj._store_set_values(cr, uid, rids, fields, context)
 
         # recompute new-style fields
-        recs.recompute()'''
-        super(BaseModelSync, self).unlink(cr, uid, ids, context=None)
-        print "Unlink"
-
-        ''' 
-        dont_sync_models = ['ir.model.data', 'ir.model.data.sync']
-
-        # This is to avoid and unnecessary models
-        model_obj = self.pool.get()
-        for model in model_obj.search([('osv_memory','=',True)]):
-            print model.name
-            dont_sync_models.append(model.name)
-
-        if self._name not in dont_sync_models and 'synchronized' not in self.env.context:
-            xml_id = self.__export_xml_id().split(".")
-            xml_id_record = self.env['ir.model.data'].sudo().search([
-                ('module','=',xml_id[0]),
-                ('name','=',xml_id[1])
-                ])
-            xml_id_record.unlinked = True
-            xml_id_record.sudo().send_this_to_couch()
-        '''
+        recs.recompute()
 
         return True
 
-    #models.Model.create = create_sync
-    #models.Model.write = write_sync
-class teste(object):
-    def unlink_syncs(self, cr, uid, ids, context=None):
-        model_inheritance = models.Model().unlink(cr, uid, ids, context=None)
-        print model_inheritance
-        #.unlink(cr, uid, ids, context=None)
-        #model_inheritance.unlink(cr, uid, ids, context=None)
-        print "Foi Unlink"
-        return True
-
-    models.Model.unlink = unlink_syncs
+    models.Model.unlink = unlink_couch'''

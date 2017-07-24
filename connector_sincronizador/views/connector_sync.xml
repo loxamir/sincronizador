@@ -12,19 +12,21 @@
         <record id="connector_sync" model="ir.ui.view">
             <field name="name">Sync Form</field>
             <field name="model">ir.model.data.sync</field>
-            <field name="arch" type="xml"> 
+            <field name="arch" type="xml">
                 <form>
                     <header>
-                        
+
                         <!--button name="create_xmlid_for_everything" string="Create External ID for everything" type="object"/>
                         <button name="send_all_to_couch" string="Send All To Couch" type="object"/-->
                         <button name="first_time" string="Primera vez" type="object"/>
-                        <!--button name="set_sequence" string="Sequenciar" type="object"/-->
                         <button name="send_changes_to_couch" string="Send all changes" type="object"/>
+                        <button name="get_data_continuos" string="Get Sync Continuous" type="object"/>
                     </header>
                     <group>
                         <group>
-                            <field name="server"/>
+                            <field name="hostname"/>
+                            <field name="couchdb_server"/>
+                            <field name="couchdb_port"/>
                             <field name="couch_database"/>
                         </group>
                         <group>
@@ -49,7 +51,7 @@
         <record id="connector_sync_queue" model="ir.ui.view">
             <field name="name">Sync Queue Form</field>
             <field name="model">ir.model.data.sync.queue</field>
-            <field name="arch" type="xml"> 
+            <field name="arch" type="xml">
                 <form>
                     <header>
                         <button name="send_to_couch" string="Enviar" type="object"/>
@@ -70,7 +72,7 @@
         <record id="connector_sync_queue_tree" model="ir.ui.view">
             <field name="name">Sync Queue Tree</field>
             <field name="model">ir.model.data.sync.queue</field>
-            <field name="arch" type="xml"> 
+            <field name="arch" type="xml">
                 <tree>
                     <field name="name"/>
                     <field name="sequence"/>

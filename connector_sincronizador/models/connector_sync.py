@@ -8,13 +8,30 @@ import logging
 
 _logger = logging.getLogger(__name__)
 
+
 class IrModelDataSync(models.Model):
     _name = 'ir.model.data.sync'
 
-    server = fields.Char(string="Server")
-    last_seq = fields.Char(string="Last Sequence")
-    couch_database = fields.Char(string="CouchDB Database")
-    last_sync_sequence = fields.Integer(string="Last Sync Sequence")
+    hostname = fields.Char(
+        string="Host Name",
+        )
+    couchdb_server = fields.Char(
+        string="Couchdb Server",
+        default="localhost",
+        )
+    couchdb_port = fields.Integer(
+        string="Couchdb port",
+        default="5984",
+        )
+    couch_database = fields.Char(
+        string="CouchDB Database",
+        )
+    last_seq = fields.Char(
+        string="Last Sequence",
+        )
+    last_sync_sequence = fields.Integer(
+        string="Last Sync Sequence",
+        )
 
     def translate_sync(self, register):
         vals = eval(register.vals)
@@ -41,6 +58,7 @@ class IrModelDataSync(models.Model):
                     val['value'] = external_ids
                 elif val['type'] == 'one2many':
                     continue
+            print vals
             if vals['odoo_model'] == 'mail.message':
                 result['res_id'] = self.env[vals['model']].browse(
                     vals['res_id']).get_xml_id().values()[0]
@@ -52,6 +70,31 @@ class IrModelDataSync(models.Model):
                 dependences.append(result['res_id'])
             result[key] = val
         return result, dependences
+
+    @api.multi
+    def get_data_continuos(self):
+        #user = odoo.env.user
+        sync_data = self.env.ref('connector_sincronizador.config')
+        hostname = sync_data.hostname
+        last_seq = sync_data.last_seq
+        sincronizador = self.env['ir.model.data.sync']
+
+        url = "http://%s:%s" % (self.couchdb_server, self.couchdb_port)
+        couch = couchdb.Server(url=url)
+        db = couch[sync_data.couch_database]
+
+        retry_ids = []
+        for changes in db.changes(
+                feed='continuous', heartbeat='1000', include_docs=True,
+                since=last_seq):
+            # if changes['doc']['hostnamke'] != hostname:
+            # changes['doc'].pop('hostnamke', None)
+            print "%s - Importing %s" % (changes['seq'], changes['doc']['_id'])
+            importation = sincronizador.import_doc(changes['doc'])
+            if importation:
+                sync_data.last_seq = changes['seq']
+            print importation
+            self.env.cr.commit()
 
     @api.multi
     def set_sequence(self):
@@ -83,7 +126,7 @@ class IrModelDataSync(models.Model):
         for change in self.env['ir.model.data.sync.queue'].search(
                 [], order='sequence'):
             print "sequence: %s name %s" % (change.sequence, change.name)
-            # change.send_to_couch()
+            change.send_to_couch()
         return True
 
     @api.multi
@@ -108,7 +151,8 @@ class IrModelDataSync(models.Model):
 
     @api.model
     def create_couch(self, xmlid):
-        couch = couchdb.Server(url='http://192.168.0.50:5984')
+        url = "http://%s:%s" % (self.couchdb_server, self.couchdb_port)
+        couch = couchdb.Server(url=url)
         db = couch[self.couch_database]
 
         if xmlid.res_id == 0:
@@ -137,8 +181,8 @@ class IrModelDataSync(models.Model):
                 ('res_id', '=', doc['res_id'])
                 ]).complete_name
         doc['odoo_model'] = xmlid.model
-        doc['server'] = self.env['ir.model.data.sync'].search(
-            [], limit=1).server
+        doc['hostname'] = self.env['ir.model.data.sync'].search(
+            [], limit=1).hostname
         db.save(doc)
         if not xmlid._id:
             xmlid._id = doc['_id']
@@ -147,7 +191,8 @@ class IrModelDataSync(models.Model):
 
     @api.model
     def write_couch(self, xmlid, vals):
-        couch = couchdb.Server(url='http://192.168.0.50:5984')
+        url = "http://%s:%s" % (self.couchdb_server, self.couchdb_port)
+        couch = couchdb.Server(url=url)
         db = couch[self.couch_database]
 
         if xmlid.res_id == 0:
@@ -185,8 +230,8 @@ class IrModelDataSync(models.Model):
                 ]).complete_name
 
         doc['odoo_model'] = xmlid.model
-        doc['server'] = self.env['ir.model.data.sync'].search(
-            [], limit=1).server
+        doc['hostname'] = self.env['ir.model.data.sync'].search(
+            [], limit=1).hostname
         db.save(doc)
         if not xmlid._id:
             xmlid._id = doc['_id']
@@ -200,7 +245,8 @@ class IrModelDataSync(models.Model):
 
     @api.model
     def unlink_couch(self, xmlid, vals):
-        couch = couchdb.Server(url='http://192.168.0.50:5984')
+        url = "http://%s:%s" % (self.couchdb_server, self.couchdb_port)
+        couch = couchdb.Server(url=url)
         db = couch[self.couch_database]
         if xmlid.unlinked:
             if '_id' in doc:
@@ -220,12 +266,12 @@ class IrModelDataSync(models.Model):
             ], limit=1)
         if exiting_external_id:
             return exiting_external_id.complete_name
-        server = self.env['ir.model.data.sync'].browse(1).server
+        hostname = self.env['ir.model.data.sync'].browse(1).hostname
         postfix = 0
         name = '%s_%s' % (model.replace('.', '_'), res_id)
 
         while ir_model_data.search([
-            ('module', '=', server),
+            ('module', '=', hostname),
             ('name', '=', name),
                 ]):
             postfix += 1
@@ -233,10 +279,10 @@ class IrModelDataSync(models.Model):
         ir_model_data.create({
             'model': model,
             'res_id': res_id,
-            'module': server,
+            'module': hostname,
             'name': name,
         })
-        return server + '.' + name
+        return hostname + '.' + name
 
     @api.multi
     def create_xmlid_for_everything(self):
@@ -251,7 +297,8 @@ class IrModelDataSync(models.Model):
 
         for model in self.env['ir.model'].search([
                 ('osv_memory', '!=', True),
-                ('model', 'not in', dont_sync_models)
+                ('model', 'not in', dont_sync_models),
+                ('sincronizable', '=', True),
                 ]):
             if not self.env['ir.model.fields'].search([
                     ('model_id', '=', model.id),
@@ -282,7 +329,8 @@ class IrModelDataSync(models.Model):
         # Conclusion: the command db.get(external_id) is what make this slow
 
         print "Preparing all data"
-        couch = couchdb.Server(url='http://192.168.0.50:5984')
+        url = "http://%s:%s" % (self.couchdb_server, self.couchdb_port)
+        couch = couchdb.Server(url=url)
         #db = couch[self.couch_database]
         try:
             db = couch[self.couch_database]
@@ -295,6 +343,7 @@ class IrModelDataSync(models.Model):
         all_models = self.env['ir.model'].search([
             ('osv_memory', '=', False),
             ('model', 'not in', dont_sync_models),
+            ('sincronizable', '=', True),
             ])
         unused_fields = ['id', '__last_update', 'global']
 
@@ -353,6 +402,7 @@ class IrModelDataSync(models.Model):
 
     @api.multi
     def import_doc(self, doc):
+        print "doc %s" % doc
         if doc['odoo_model'] == 'im_chat.message':
             from_uid = self.env.ref(doc['from_id']['id']).id
             uuid = self.env.ref(doc['to_id']['id']).uuid
@@ -379,6 +429,14 @@ class IrModelDataSync(models.Model):
                             and key == exception['field']:
                         ignore_field = True
                         continue
+                '''this_model_id = self.env['ir.model'].search([
+                    ('model', '=', doc['odoo_model']),
+                    ]).id
+                if self.env['ir.model.fields'].search([
+                    ('name', '=', key),
+                    ('model_id', '=', this_model_id)
+                ]).readonly:
+                    continue'''
                 if ignore_field:
                     continue
 
@@ -407,7 +465,7 @@ class IrModelDataSync(models.Model):
             if model == 'mail.message':
                 vals['res_id'] = self.env.ref(doc['res_xmlid']).id
                 vals.pop('res_xmlid', None)
-
+            print "vals %s" % vals
             res = self.env[model].with_context({
                 'synchronized': True,
                 'tracking_disable': True,
@@ -511,19 +569,20 @@ class IrModelDataSyncQueue(models.Model):
     sequence = fields.Integer(string="Sync Sequence")
     # second_sequence = fields.Integer(string="Second Sequence")
     # dependences = fields.Char(string="Dependences")
-    # method = fields.Selection([
-    #    ('create','Create'),
-    #    ('write','Write'),
-    #    ('unlink','Remove')
-    #    ], string="Method")
+    '''method = fields.Selection([
+        ('create', 'Create'),
+        ('write', 'Write'),
+        ('unlink', 'Remove')
+        ], string="Method")'''
 
     @api.multi
     def send_to_couch(self):
         self.ensure_one()
-        couch = couchdb.Server(url='http://192.168.0.50:5984')
-        couch_database = self.env.ref('connector_sync.config').couch_database
+        config = self.env.ref('connector_sincronizador.config')
+        url = "http://%s:%s" % (config.couchdb_server, config.couchdb_port)
+        couch = couchdb.Server(url=url)
         # print couch_database
-        db = couch[couch_database]
+        db = couch[config.couch_database]
         # print self.name
         vals = db.get(self.name) or {'_id': self.name}
         for key, val in eval(self.vals).iteritems():
@@ -531,3 +590,9 @@ class IrModelDataSyncQueue(models.Model):
         db.save(vals)
         self.unlink()
         return True
+
+    @api.model
+    def create(self, vals):
+        res = super(IrModelDataSyncQueue, self).create(vals)
+        self.env.ref('connector_sincronizador.config').send_changes_to_couch()
+        return res

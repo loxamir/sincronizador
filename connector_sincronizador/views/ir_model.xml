@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openerp>
+    <data>
+
+        <record id="ir_model_form" model="ir.ui.view">
+             <field name="name">Couchdb Form</field>
+             <field name="model">ir.model</field>
+             <field name="inherit_id" ref="base.view_model_form"/>
+             <field name="arch" type="xml">
+                 <field name="modules" position="after">
+                     <field name="sincronizable"/>
+                     <!--field name="couch_seq"/>
+                     <button name="action_sync_to_couchdb" type="object" string="Enviar"/>
+                     <button name="action_sync_from_couchdb" type="object" string="Recibir"/-->
+                 </field>
+             </field>
+        </record>
+        <record id="ir_model_tree" model="ir.ui.view">
+             <field name="name">Couchdb Tree</field>
+             <field name="model">ir.model</field>
+             <field name="inherit_id" ref="base.view_model_tree"/>
+             <field name="arch" type="xml">
+                <field name="osv_memory" position="after">
+                    <field name="sincronizable"/>
+                </field>
+             </field>
+        </record>
+    </data>
+</openerp>
