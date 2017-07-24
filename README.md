@@ -1,4 +1,4 @@
-# Synchronize your Odoo and get tracking of all changes
+# Synchronize your Odoo in realtime and get tracking of all changes
 
 This module allow the user work locally with a server and synchronize the data in real time while there's internet, when the internet goes down it keep the system working and synchronize every document when the internet came back.
 
